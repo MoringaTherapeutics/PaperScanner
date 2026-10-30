@@ -96,16 +96,20 @@ def test_coverage_audit_flags_open_items(seeded, registry, fake_fulltext):
 # ---- Sheets: one-way sync + verdicts ----------------------------------------------------------
 class FakeWS:
     def __init__(self, title, records=None):
-        self.title, self.records, self.written, self.row_count = title, records or [], [], 1000
+        self.title, self.records, self.written, self.row_count, self.id = title, records or [], [], 1000, abs(hash(title)) % 10**6
 
     def clear(self): self.written = []
     def resize(self, rows): self.row_count = rows
-    def update(self, values, range_name): self.written.append((range_name, values))
+    def update(self, values, range_name, **kw): self.written.append((range_name, values))
     def get_all_records(self): return self.records
 
 
 class FakeWB:
+    def batch_update(self, body):
+        self.batches.append(body)
+
     def __init__(self, verdicts=None):
+        self.batches = []
         self.tabs = {"Studies": FakeWS("Studies"), "Review_Verdicts": FakeWS("Review_Verdicts", verdicts)}
 
     def worksheet(self, t):
@@ -162,3 +166,26 @@ def test_real_retrieve_keeps_no_text_copy_unless_asked(tmp_path, monkeypatch):
     monkeypatch.setenv("KEEP_FULLTEXT", "1")
     fulltext.retrieve(pub)
     assert (tmp_path / "cache" / "W1.txt").exists()
+
+
+def test_measurement_header_mirrors_constant_so_review_lookups_cannot_drift(seeded, registry, fake_fulltext):
+    pipeline.run_scan(seeded, FakeOpenAlex(works()), FakeLLM(extraction_payload()), registry, SP, page_budget=100)
+    wb = FakeWB()
+    sheets_sync.sync_out(seeded, wb)
+    assert wb.tabs["DB_Measurements"].written[0][1][0] == sheets_sync.MEASUREMENT_HEADER
+
+
+def test_review_tab_is_created_with_dropdown_lookups_and_is_never_overwritten(seeded):
+    wb = FakeWB()
+    del wb.tabs["Review_Verdicts"]
+    assert sheets_sync.ensure_review_tab(wb) is True
+    ws = wb.tabs["Review_Verdicts"]
+    assert ws.written[0] == ("A1", [["measurement_id", "verdict", "reviewer", "note", "analyte", "value_original",
+                                     "unit_original", "basis", "source_quote", "doi_link", "fulltext_link", "current_status"]])
+    formulas = ws.written[1][1][0]
+    assert ws.written[1][0] == "E2" and formulas[1].count("$Q:$Q") == 1  # value_original = column Q of DB_Measurements
+    reqs = wb.batches[0]["requests"]
+    assert [list(r)[0] for r in reqs] == ["setDataValidation", "copyPaste", "updateSheetProperties"]
+    vals = reqs[0]["setDataValidation"]["rule"]["condition"]["values"]
+    assert [v["userEnteredValue"] for v in vals] == ["approve", "reject", "needs_work"]
+    assert sheets_sync.ensure_review_tab(wb) is False and len(wb.batches) == 1  # existing tab untouched
