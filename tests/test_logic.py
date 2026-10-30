@@ -261,3 +261,19 @@ def test_europe_pmc_is_tried_first_for_pmc_records():
     assert urls[0]["url"] == "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC3071761/fullTextXML"
     assert urls[1]["url"] == "https://pub.example/a.pdf"
     assert [u["url"] for u in fulltext.candidate_urls([{"pdf": "https://x/y.pdf", "landing": None, "version": None, "source": None}])] == ["https://x/y.pdf"]
+
+
+def test_abstract_sized_pages_are_not_treated_as_full_text():
+    from src import fulltext
+
+    class R:
+        status_code, headers, raw = 200, {"content-type": "text/html"}, None
+        content = b"<html><body>" + b"Abstract text. " * 200 + b"</body></html>"  # ~3,000 chars
+
+    class S:
+        def get(self, *a, **k): return R()
+
+    text, err = fulltext.fetch_text("https://x/y", S())
+    assert text is None and "text too short" in err and "abstract page" in err
+    R.content = b"<html><body>" + b"Methods and results sentence. " * 400 + b"</body></html>"  # ~12,000 chars
+    assert fulltext.fetch_text("https://x/y", S())[0] is not None

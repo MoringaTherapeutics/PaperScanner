@@ -10,6 +10,8 @@ import requests
 
 CACHE = Path(os.environ.get("FULLTEXT_CACHE", ".cache/fulltext"))
 MAX_BYTES = 30 * 1024 * 1024
+# Below this the "document" is almost certainly an abstract or landing page, not the paper.
+MIN_CHARS = int(os.environ.get("MIN_FULLTEXT_CHARS", "8000"))
 _EMAIL = os.environ.get("CONTACT_EMAIL")
 HEADERS = {"User-Agent": "global-plant-research-scanner/0.1" + (f" (mailto:{_EMAIL})" if _EMAIL else "")}
 EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
@@ -63,8 +65,8 @@ def fetch_text(url: str, session=None) -> tuple[str | None, str | None]:
         ctype = r.headers.get("content-type", "").lower()
         is_pdf = "pdf" in ctype or data[:5] == b"%PDF-"
         text = pdf_to_text(data) if is_pdf else html_to_text(data)
-        if len(text.strip()) < 2000:
-            return None, "text too short (likely paywall or scanned image)"
+        if len(text.strip()) < MIN_CHARS:
+            return None, f"text too short ({len(text.strip())} chars; likely an abstract page, paywall or scanned image)"
         return text, None
     except Exception as e:  # network/parse failures are logged, never fatal
         return None, f"{type(e).__name__}: {e}"
