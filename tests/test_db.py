@@ -125,3 +125,16 @@ def test_screening_takes_best_ranked_records_first(seeded):
     oas.run_query(seeded, FakeOpenAlex(works), SP, "chemical", "q")
     first = screening.pending_stage1(seeded, SP, 2)
     assert [r["publication_id"] for r in first] == ["W1004", "W1003"]
+
+
+def test_normalized_value_is_stored_separately_and_original_is_untouched(seeded):
+    prep_study(seeded)
+    ex.store_extraction(seeded, "S1", SP, extraction_payload(), DOC, "m")
+    rows = fetch_all(seeded, "SELECT value_original, unit_original, value_numeric, value_normalized, unit_normalized "
+                             "FROM measurements WHERE unit_original LIKE 'mg/g%%'")
+    assert len(rows) == 1  # Curcumin 54.3 mg/g extract
+    r = rows[0]
+    assert r["value_original"] == "54.3" and r["value_numeric"] == 54.3
+    assert r["unit_normalized"] == "mg/100 g" and r["value_normalized"] == pytest.approx(5430.0)
+    ge = fetch_all(seeded, "SELECT value_normalized FROM measurements WHERE unit_original LIKE '%%GAE%%'")
+    assert all(x["value_normalized"] is None for x in ge)  # equivalents are never converted

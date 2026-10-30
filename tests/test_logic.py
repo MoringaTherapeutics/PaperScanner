@@ -277,3 +277,55 @@ def test_abstract_sized_pages_are_not_treated_as_full_text():
     assert text is None and "text too short" in err and "abstract page" in err
     R.content = b"<html><body>" + b"Methods and results sentence. " * 400 + b"</body></html>"  # ~12,000 chars
     assert fulltext.fetch_text("https://x/y", S())[0] is not None
+
+
+# ---- unit rule: only recognized, unambiguous units can be verified ---------------------------------
+from src import units  # noqa: E402
+
+
+@pytest.mark.parametrize("unit,expected", [
+    ("mg/100 g", 1.0), ("mg/g", 100.0), ("g/kg", 100.0), ("%", 1000.0), ("g/100 g", 1000.0),
+    ("\u00b5g/g", 0.1), ("mcg/g", 0.1), ("ug/100 g", 0.001), ("mg/kg", 0.1), ("mg g-1", 100.0),
+    ("mg/g dry weight", 100.0), ("mg/g extract", 100.0), ("mg/100 g fresh weight", 1.0),
+])
+def test_mass_units_normalize_to_mg_per_100g(unit, expected):
+    v, u = units.normalize(1.0, unit)
+    assert u == "mg/100 g" and v == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("unit,cls", [
+    ("ppm", "ambiguous"), ("ppb", "ambiguous"), ("mg GAE/g dry weight", "equivalent"), ("\u00b5g/mL", "per_volume"),
+    ("IC50 \u00b5g/mL", "activity"), ("", "unknown"), ("furlongs", "unknown"), ("mg", "unknown"),
+])
+def test_unit_classes(unit, cls):
+    assert units.classify(unit)["class"] == cls
+    if cls != "unknown" or unit == "":
+        pass
+    assert units.normalize(5.0, unit) == (None, None)  # never converted
+
+
+def _row(unit, value="3.40", quote="Calcium 3.40"):
+    return {"value_original": value, "unit": unit, "basis": "dry", "method": "AAS", "locator": "Table 1",
+            "source_quote": quote, "uncertainty_type": "SD"}
+
+
+def test_ppm_and_unknown_units_can_never_be_verified():
+    doc = ex.normalize("Table 1 (mg/g) Calcium 3.40 ppm")
+    for unit in ("ppm", "", "furlongs", "mg"):
+        verdict, why = ex.judge_measurement(_row(unit), doc)
+        assert verdict == "review" and why, unit
+    assert ex.judge_measurement(_row("mg/g"), doc)[0] == "verified"
+
+
+def test_values_above_100_percent_of_the_sample_are_quarantined_in_any_mass_unit():
+    doc = ex.normalize("Table 1 Calcium 150 g/100 g; Iron 2000 mg/g; Zinc 90 %")
+    assert ex.judge_measurement(_row("g/100 g", "150", "Calcium 150"), doc)[0] == "quarantine"
+    assert ex.judge_measurement(_row("mg/g", "2000", "Iron 2000"), doc)[0] == "quarantine"
+    assert ex.judge_measurement(_row("%", "90", "Zinc 90"), doc)[0] != "quarantine"
+
+
+def test_ranges_and_inequalities_are_not_normalized_or_verified():
+    doc = ex.normalize("Table 1 (mg/g) Iron 2.1-3.4 Zinc <0.1")
+    for val, q in (("2.1-3.4", "Iron 2.1-3.4"), ("<0.1", "Zinc <0.1")):
+        verdict, why = ex.judge_measurement(_row("mg/g", val, q), doc)
+        assert verdict == "review" and any("range, inequality" in w for w in why)
