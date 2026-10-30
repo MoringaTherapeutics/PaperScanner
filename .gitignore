@@ -1,0 +1,10 @@
+.cache/
+__pycache__/
+*.pyc
+.env
+data/import_dry_run/
+.pytest_cache/
+
+# private workbook inputs: keep local, never commit
+data/
+config/workbook_audit_*.json

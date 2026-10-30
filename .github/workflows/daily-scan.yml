@@ -1,0 +1,49 @@
+name: Daily Plant Research Scan
+
+# Cron is UTC (06:07 UTC = 23:07 PDT / 22:07 PST). GitHub's schedule trigger is documented in UTC;
+# if you want a native timezone key, confirm it in GitHub's current workflow syntax first.
+on:
+  workflow_dispatch:
+    inputs:
+      species:
+        description: "species_id to run (blank = highest-priority unfinished)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "7 6 * * *"
+
+concurrency:
+  group: plant-scan
+  cancel-in-progress: false   # never run two scans against the same checkpoints
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Apply migrations and load species
+        run: |
+          python main.py migrate
+          python main.py load-species
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}   # use the Supabase connection-pooler string (IPv4)
+      - name: Scan
+        run: python main.py scan --species "${{ github.event.inputs.species }}"
+        env:
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          # Hard caps: the run stops and saves its checkpoint when any is reached.
+          MAX_LLM_CALLS: ${{ vars.MAX_LLM_CALLS || '150' }}
+          PAGE_BUDGET: ${{ vars.PAGE_BUDGET || '25' }}
+          SCREEN_LIMIT: ${{ vars.SCREEN_LIMIT || '120' }}
+          EXTRACT_LIMIT: ${{ vars.EXTRACT_LIMIT || '8' }}

@@ -1,0 +1,14 @@
+species_id,accepted_name,authority,priority,synonyms,common_names
+SP_CURCUMA_LONGA,Curcuma longa,L.,1,Curcuma domestica,turmeric;haldi;haridra;cúrcuma;curcuma;jiang huang;kunyit
+SP_ZINGIBER_OFFICINALE,Zingiber officinale,Roscoe,2,,ginger;gingembre;jengibre;adrak;shengjiang;jahe
+SP_ANNONA_MURICATA,Annona muricata,L.,3,,soursop;graviola;guanabana;corossol
+SP_COCOS_NUCIFERA,Cocos nucifera,L.,4,,coconut;coco;noix de coco
+SP_MOMORDICA_CHARANTIA,Momordica charantia,L.,5,,bitter melon;bitter gourd;karela;balsam pear;ku gua
+SP_CITRULLUS_LANATUS,Citrullus lanatus,(Thunb.) Matsum. & Nakai,6,Citrullus vulgaris,watermelon;pastèque;sandía
+SP_CITRUS_SINENSIS,Citrus sinensis,(L.) Osbeck,7,,sweet orange;orange;naranja
+SP_VACCINIUM_CORYMBOSUM,Vaccinium corymbosum,L.,8,,highbush blueberry;blueberry;arándano
+SP_JUGLANS_REGIA,Juglans regia,L.,9,,walnut;English walnut;Persian walnut;noyer;nogal
+SP_ABELMOSCHUS_ESCULENTUS,Abelmoschus esculentus,(L.) Moench,10,Hibiscus esculentus,okra;lady's finger;gombo;bhindi;quiabo
+SP_PRUNUS_AVIUM,Prunus avium,(L.) L.,11,,sweet cherry;wild cherry;gean
+SP_PRUNUS_CERASUS,Prunus cerasus,L.,12,,sour cherry;tart cherry;Montmorency cherry
+SP_BRASSICA_OLERACEA_GEMMIFERA,Brassica oleracea var. gemmifera,DC.,13,Brassica oleracea Gemmifera Group,Brussels sprouts;choux de Bruxelles
