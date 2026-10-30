@@ -79,8 +79,9 @@ def retrieve(publication: dict, session=None) -> dict:
         text, err = fetch_text(cand["url"], session)
         if text:
             sha = hashlib.sha256(text.encode()).hexdigest()
-            CACHE.mkdir(parents=True, exist_ok=True)
-            (CACHE / f"{publication['publication_id']}.txt").write_text(text, encoding="utf-8")
+            if os.environ.get("KEEP_FULLTEXT") == "1":  # off by default: only the link and a fingerprint are kept
+                CACHE.mkdir(parents=True, exist_ok=True)
+                (CACHE / f"{publication['publication_id']}.txt").write_text(text, encoding="utf-8")
             return {"publication_id": publication["publication_id"], "status": "retrieved",
                     "source_url": cand["url"], "version_source": cand["version"] or cand["source"],
                     "content_sha256": sha, "n_chars": len(text), "error": None, "text": text}

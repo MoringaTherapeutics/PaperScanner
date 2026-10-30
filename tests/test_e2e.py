@@ -139,3 +139,26 @@ def test_human_verdicts_flow_back_without_rewriting_values(seeded, registry, fak
     st = {r["measurement_id"]: r["verification_status"] for r in fetch_all(seeded, "SELECT measurement_id, verification_status FROM measurements")}
     assert st[ids[0]] == "N" and st[ids[1]] == "Y"
     assert fetch_all(seeded, "SELECT measurement_id, value_original FROM measurements ORDER BY 1") == before
+
+
+def test_sheet_rows_carry_links(seeded, registry, fake_fulltext):
+    pipeline.run_scan(seeded, FakeOpenAlex(works()), FakeLLM(extraction_payload()), registry, SP, page_budget=100)
+    wb = FakeWB()
+    sheets_sync.sync_out(seeded, wb)
+    header = wb.tabs["DB_Measurements"].written[0][1][0]
+    assert {"doi_link", "fulltext_link", "version_source"} <= set(header)
+    row = dict(zip(header, wb.tabs["DB_Measurements"].written[0][1][1]))
+    assert row["doi_link"].startswith("https://doi.org/10.1000/test.") and row["fulltext_link"] == "u"
+
+
+def test_real_retrieve_keeps_no_text_copy_unless_asked(tmp_path, monkeypatch):
+    monkeypatch.setattr(fulltext, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(fulltext, "fetch_text", lambda url, session=None: ("x" * 9000, None))
+    pub = {"publication_id": "W1", "pmcid": None, "oa_urls": [{"pdf": "https://a/b.pdf", "landing": None, "version": "publishedVersion", "source": "P"}]}
+    monkeypatch.delenv("KEEP_FULLTEXT", raising=False)
+    doc = fulltext.retrieve(pub)
+    assert doc["status"] == "retrieved" and doc["source_url"] == "https://a/b.pdf" and len(doc["content_sha256"]) == 64
+    assert not (tmp_path / "cache").exists()
+    monkeypatch.setenv("KEEP_FULLTEXT", "1")
+    fulltext.retrieve(pub)
+    assert (tmp_path / "cache" / "W1.txt").exists()

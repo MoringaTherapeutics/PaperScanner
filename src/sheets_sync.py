@@ -28,12 +28,14 @@ def assert_generated(tab: str) -> None:
 
 QUERIES = {
     "DB_Measurements": (
-        "SELECT m.measurement_id, st.study_id, p.doi, p.title AS publication_title, a.name AS analyte, "
+        "SELECT m.measurement_id, st.study_id, p.doi, 'https://doi.org/' || p.doi AS doi_link, "
+        "sd.source_url AS fulltext_link, sd.version_source, p.year, p.title AS publication_title, a.name AS analyte, "
         "e.plant_part, e.preparation, pr.solvent, pr.solvent_concentration, pr.technique, pr.temperature, "
         "pr.duration, m.value_original, m.unit_original, m.basis, m.uncertainty_type, m.uncertainty_value, "
         "m.n, m.method, m.locator, m.source_quote, m.verification_status "
         "FROM measurements m JOIN extracts e USING (extract_id) JOIN studies st USING (study_id) "
-        "LEFT JOIN publications p ON p.publication_id=st.publication_id JOIN analytes a USING (analyte_id) "
+        "LEFT JOIN publications p ON p.publication_id=st.publication_id "
+        "LEFT JOIN source_documents sd ON sd.publication_id=st.publication_id JOIN analytes a USING (analyte_id) "
         "LEFT JOIN extraction_protocols pr ON pr.protocol_id=e.protocol_id "
         "ORDER BY st.study_id, e.extract_id, a.name"
     ),
