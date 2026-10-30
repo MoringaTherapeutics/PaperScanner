@@ -18,7 +18,7 @@ SELECT = (
     "id,doi,title,publication_year,type,authorships,primary_location,locations,open_access,"
     "ids,abstract_inverted_index,referenced_works,cited_by_api_url,is_retracted"
 )
-MAX_QUERY_RESULTS = 5000  # above this, split by non-overlapping publication years
+MAX_QUERY_RESULTS = 100_000  # cursor paging has no 10k cap; split by year only for truly huge queries
 
 
 class OpenAlexError(RuntimeError):
@@ -231,12 +231,13 @@ def plan_filters(reported_total: int | None, first_year: int = 1900, last_year: 
     if reported_total is None or reported_total <= MAX_QUERY_RESULTS:
         return [""]
     last_year = last_year or datetime.now().year
-    # Non-overlapping, gap-free: <=1999 in one block, 2000-2009 in 5-year blocks, 2010+ per year.
-    return (
+    # Non-overlapping, gap-free, newest first (recent papers are more often open access).
+    blocks = (
         year_partitions(first_year, 1999, 100)
         + year_partitions(2000, 2009, 5)
         + year_partitions(2010, last_year, 1)
     )
+    return blocks[::-1]
 
 
 def count_only(client: OpenAlexClient, query: str, filt: str = "") -> int:

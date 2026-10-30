@@ -73,7 +73,7 @@ def run_searches(conn, oa: oas.OpenAlexClient, sp: Species, page_budget: int) ->
 def pending_extraction(conn, species_id: str, limit: int) -> list[dict]:
     return fetch_all(
         conn,
-        "SELECT p.publication_id, p.title, p.oa_urls FROM species_publications sp "
+        "SELECT p.publication_id, p.title, p.oa_urls, p.pmcid FROM species_publications sp "
         "JOIN publications p USING (publication_id) "
         "JOIN screening s ON s.publication_id=p.publication_id AND s.species_id=sp.species_id AND s.stage=1 "
         "  AND s.decision IN ('likely_eligible','uncertain') "

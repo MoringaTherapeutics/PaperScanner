@@ -10,19 +10,24 @@ import requests
 
 CACHE = Path(os.environ.get("FULLTEXT_CACHE", ".cache/fulltext"))
 MAX_BYTES = 30 * 1024 * 1024
-HEADERS = {"User-Agent": "global-plant-research-scanner (mailto:" + os.environ.get("CONTACT_EMAIL", "unset") + ")"}
+_EMAIL = os.environ.get("CONTACT_EMAIL")
+HEADERS = {"User-Agent": "global-plant-research-scanner/0.1" + (f" (mailto:{_EMAIL})" if _EMAIL else "")}
+EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
 
 # Prefer the authoritative published version, then accepted manuscripts, then preprints.
 VERSION_RANK = {"publishedVersion": 0, "acceptedVersion": 1, "submittedVersion": 2, None: 3}
 
 
-def candidate_urls(oa_urls: list[dict]) -> list[dict]:
+def candidate_urls(oa_urls: list[dict], pmcid: str | None = None) -> list[dict]:
     out = []
     for loc in oa_urls or []:
         for kind in ("pdf", "landing"):
             if loc.get(kind):
                 out.append({"url": loc[kind], "kind": kind, "version": loc.get("version"), "source": loc.get("source")})
     out.sort(key=lambda c: (VERSION_RANK.get(c["version"], 3), 0 if c["kind"] == "pdf" else 1))
+    if pmcid:  # Europe PMC serves open-access full text by API; ncbi.nlm.nih.gov often answers 403 to scripts
+        out.insert(0, {"url": EUROPE_PMC.format(pmcid=pmcid), "kind": "xml", "version": "publishedVersion",
+                       "source": "Europe PMC"})
     return out
 
 
@@ -68,7 +73,7 @@ def fetch_text(url: str, session=None) -> tuple[str | None, str | None]:
 def retrieve(publication: dict, session=None) -> dict:
     """Try candidates in preference order. Returns a source_documents-shaped dict plus 'text'."""
     last_err = "no open-access location"
-    for cand in candidate_urls(publication.get("oa_urls") or []):
+    for cand in candidate_urls(publication.get("oa_urls") or [], publication.get("pmcid")):
         text, err = fetch_text(cand["url"], session)
         if text:
             sha = hashlib.sha256(text.encode()).hexdigest()

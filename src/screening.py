@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from .database import fetch_all, upsert
 from .llm import LLM, extract_json
@@ -15,19 +16,34 @@ SYSTEM = (
     "Ineligible: reviews and meta-analyses (secondary), purely clinical or pharmacological studies "
     "without composition measurements, papers where the plant is incidental. If the abstract is "
     "missing or ambiguous answer 'uncertain'. Reply with JSON only: "
-    '{"decision": "likely_eligible"|"likely_ineligible"|"uncertain", "reason": "<one sentence>"}'
+    '{"decision": "likely_eligible"|"likely_ineligible"|"uncertain", "reason": "<one sentence, at most 25 words>"}'
 )
 VALID = {"likely_eligible", "likely_ineligible", "uncertain"}
 
 
+_DECISION_RE = re.compile(r'"decision"\s*:\s*"(likely_eligible|likely_ineligible|uncertain)"')
+_REASON_RE = re.compile(r'"reason"\s*:\s*"([^"]*)')
+
+
+def _decide(reply: str) -> dict | None:
+    data = extract_json(reply)
+    if data and data.get("decision") in VALID:
+        return {"decision": data["decision"], "reason": str(data.get("reason", ""))[:500]}
+    m = _DECISION_RE.search(reply)  # salvage a truncated or slightly malformed reply
+    if m:
+        r = _REASON_RE.search(reply)
+        return {"decision": m.group(1), "reason": ((r.group(1) if r else "") + " [recovered from malformed reply]")[:500]}
+    return None
+
+
 def classify(llm: LLM, species_name: str, title: str, abstract: str, model: str = SCREEN_MODEL) -> dict:
     user = f"Target species: {species_name}\nTitle: {title}\nAbstract: {abstract or '(none available)'}"
-    data = extract_json(llm.ask(SYSTEM, user, model, max_tokens=200))
-    if not data or data.get("decision") not in VALID:  # one retry with a stricter reminder
-        data = extract_json(llm.ask(SYSTEM + " Output ONLY the JSON object, nothing else.", user, model, max_tokens=200))
-    if not data or data.get("decision") not in VALID:
-        return {"decision": "uncertain", "reason": "model reply unparseable; needs review"}
-    return {"decision": data["decision"], "reason": str(data.get("reason", ""))[:500]}
+    reply = llm.ask(SYSTEM, user, model, max_tokens=600)
+    res = _decide(reply)
+    if res is None:  # one retry with a stricter reminder
+        reply = llm.ask(SYSTEM + " Output ONLY the JSON object, nothing else.", user, model, max_tokens=600)
+        res = _decide(reply)
+    return res or {"decision": "uncertain", "reason": ("unparseable reply: " + reply.strip().replace("\n", " "))[:300]}
 
 
 def pending_stage1(conn, species_id: str, limit: int) -> list[dict]:

@@ -38,14 +38,15 @@ def test_reconcile():
 
 
 def test_year_partitions_cover_range_without_overlap():
-    for f in oas.plan_filters(10_000, first_year=1900, last_year=2026):
+    for f in oas.plan_filters(10**6, first_year=1900, last_year=2026):
         assert f.startswith("publication_year:")
     years = []
-    for f in oas.plan_filters(10_000, 1900, 2026):
+    for f in oas.plan_filters(10**6, 1900, 2026):
         span = f.split(":")[1]
         lo, _, hi = span.partition("-")
         years += list(range(int(lo), int(hi or lo) + 1))
-    assert years == list(range(1900, 2027))
+    assert sorted(years) == list(range(1900, 2027)) and len(years) == len(set(years))
+    assert oas.plan_filters(10**6, 1900, 2026)[0] == "publication_year:2026"  # newest first
     assert oas.plan_filters(100) == [""]
 
 
@@ -235,3 +236,28 @@ def test_search_uses_title_abstract_filter_not_fulltext_search_param():
     assert "is_retracted:false" in p["filter"] and p["filter"].endswith("publication_year:2020")
     assert p["sort"] == "relevance_score:desc"
     assert "," not in oas.search_params("a, b")["filter"].split(",is_retracted")[0]  # commas would split the filter
+
+
+def test_screening_recovers_truncated_and_reports_unparseable_replies():
+    from src import screening
+
+    class L:
+        def __init__(self, *replies): self.replies, self.calls = list(replies), 0
+        def ask(self, *a, **k): self.calls += 1; return self.replies.pop(0)
+
+    cut = '{"decision": "likely_eligible", "reason": "Original study measuring phenolic con'
+    assert screening.classify(L(cut), "x", "t", "a")["decision"] == "likely_eligible"
+    ok = screening.classify(L("Sure! here you go", '{"decision": "uncertain", "reason": "r"}'), "x", "t", "a")
+    assert ok == {"decision": "uncertain", "reason": "r"}
+    bad = screening.classify(L("blah", "still blah"), "x", "t", "a")
+    assert bad["decision"] == "uncertain" and "unparseable reply: still blah" in bad["reason"]
+
+
+def test_europe_pmc_is_tried_first_for_pmc_records():
+    from src import fulltext
+
+    urls = fulltext.candidate_urls([{"pdf": "https://pub.example/a.pdf", "landing": None, "version": "publishedVersion",
+                                     "source": "Pub"}], "PMC3071761")
+    assert urls[0]["url"] == "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC3071761/fullTextXML"
+    assert urls[1]["url"] == "https://pub.example/a.pdf"
+    assert [u["url"] for u in fulltext.candidate_urls([{"pdf": "https://x/y.pdf", "landing": None, "version": None, "source": None}])] == ["https://x/y.pdf"]
