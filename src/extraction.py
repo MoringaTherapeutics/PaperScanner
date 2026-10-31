@@ -13,6 +13,7 @@ import os
 import re
 import unicodedata
 
+from . import units
 from .database import upsert
 from .llm import LLM, extract_json
 
@@ -52,14 +53,6 @@ CATEGORY_FLAG = {
     "tannins": "flag_tannins", "bioactives": "flag_bioactives", "antioxidant_assays": "flag_antioxidant_assays",
 }
 
-# (unit regex, max plausible value). Values above the cap cannot be real concentrations.
-PLAUSIBLE = [
-    (re.compile(r"^%|percent|g\s*/\s*100\s*g|g\s*100\s*g", re.I), 100.0),
-    (re.compile(r"mg\s*/\s*100\s*g", re.I), 100_000.0),
-    (re.compile(r"mg\s*/\s*g|g\s*/\s*kg", re.I), 1_000.0),
-]
-
-
 # ---------- identifiers -------------------------------------------------------------------------
 def _h(*parts: object) -> str:
     return hashlib.sha1("|".join("" if p is None else str(p).strip().lower() for p in parts).encode()).hexdigest()[:16]
@@ -94,6 +87,7 @@ def normalize(text: str) -> str:
 
 
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
+SIMPLE_VALUE = re.compile(r"^\s*\d+(?:[.,]\d+)?(?:\s*(?:±|\+/-)\s*\d+(?:[.,]\d+)?)?\s*$")
 
 
 def numbers(s: str) -> list[str]:
@@ -132,19 +126,21 @@ def judge_measurement(m: dict, doc_norm: str) -> tuple[str, list[str]]:
         hard.append("missing locator")
 
     v = to_float(value)
-    if v is not None and unit:
-        for rx, cap in PLAUSIBLE:
-            if rx.search(unit) and v > cap:
-                hard.append(f"implausible: {v} {unit}")
-                break
+    info = units.classify(unit)
+    if info["class"] in ("unknown", "ambiguous"):
+        soft.append(info["reason"])  # never verified with an unrecognized or ambiguous unit
+    elif info["class"] == "mass_fraction" and v is not None:
+        norm = units.to_mg_per_100g(v, info)
+        if norm is not None and norm > units.MAX_MG_PER_100G:
+            hard.append(f"implausible: {v} {unit} exceeds 100 g per 100 g")
     if v is not None and v < 0:
         hard.append("negative concentration")
+    if value and not SIMPLE_VALUE.match(value):
+        soft.append("value is a range, inequality or has extra text; check before normalizing")
 
     if (m.get("basis") or "unknown") == "unknown":
         soft.append("basis not stated")
-    if not unit:
-        soft.append("unit missing")
-    else:
+    if unit and info["class"] not in ("unknown", "ambiguous"):
         nu, nq = normalize(unit), normalize(quote)
         if nu not in nq:
             pos = doc_norm.find(nq)  # table units usually sit in the header just above the row
@@ -232,11 +228,14 @@ def store_extraction(conn, study_id: str, species_id: str, result: dict, doc_tex
                                       "category": m.get("category")}, ["analyte_id"], update_cols=())
             basis = m.get("basis") if m.get("basis") in ("fresh", "dry", "extract", "other") else "unknown"
             n = m.get("n") if isinstance(m.get("n"), int) else None
+            norm_v, norm_u = (units.normalize(to_float(m["value_original"]), m.get("unit"))
+                              if SIMPLE_VALUE.match(m["value_original"]) else (None, None))
             ut = m.get("uncertainty_type") if m.get("uncertainty_type") in ("SD", "SE", "CI", "range", "none") else "unknown"
             upsert(conn, "measurements", {
                 "measurement_id": measurement_id(eid, aid, basis, m["locator"], m["value_original"]),
                 "extract_id": eid, "analyte_id": aid, "value_original": m["value_original"],
                 "value_numeric": to_float(m["value_original"]), "unit_original": m.get("unit"),
+                "value_normalized": norm_v, "unit_normalized": norm_u,
                 "basis": basis, "uncertainty_type": ut, "uncertainty_value": m.get("uncertainty_value"),
                 "n": n, "method": m.get("method"), "calibration_standard": m.get("calibration_standard"),
                 "lod": m.get("lod"), "loq": m.get("loq"), "locator": m["locator"],
@@ -245,7 +244,7 @@ def store_extraction(conn, study_id: str, species_id: str, result: dict, doc_tex
                 "verified_by": "quote-check" if verdict == "verified" else None,
                 "model_version": model,
             }, ["measurement_id"], update_cols=[
-                "value_numeric", "unit_original", "uncertainty_type", "uncertainty_value", "n", "method",
+                "value_numeric", "unit_original", "value_normalized", "unit_normalized", "uncertainty_type", "uncertainty_value", "n", "method",
                 "model_version"])  # value_original / quote / status are never silently rewritten
             counts["verified" if verdict == "verified" else "review"] += 1
             flag = CATEGORY_FLAG.get(m.get("category") or "")

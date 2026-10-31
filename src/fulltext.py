@@ -10,19 +10,26 @@ import requests
 
 CACHE = Path(os.environ.get("FULLTEXT_CACHE", ".cache/fulltext"))
 MAX_BYTES = 30 * 1024 * 1024
-HEADERS = {"User-Agent": "global-plant-research-scanner (mailto:" + os.environ.get("CONTACT_EMAIL", "unset") + ")"}
+# Below this the "document" is almost certainly an abstract or landing page, not the paper.
+MIN_CHARS = int(os.environ.get("MIN_FULLTEXT_CHARS", "8000"))
+_EMAIL = os.environ.get("CONTACT_EMAIL")
+HEADERS = {"User-Agent": "global-plant-research-scanner/0.1" + (f" (mailto:{_EMAIL})" if _EMAIL else "")}
+EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
 
 # Prefer the authoritative published version, then accepted manuscripts, then preprints.
 VERSION_RANK = {"publishedVersion": 0, "acceptedVersion": 1, "submittedVersion": 2, None: 3}
 
 
-def candidate_urls(oa_urls: list[dict]) -> list[dict]:
+def candidate_urls(oa_urls: list[dict], pmcid: str | None = None) -> list[dict]:
     out = []
     for loc in oa_urls or []:
         for kind in ("pdf", "landing"):
             if loc.get(kind):
                 out.append({"url": loc[kind], "kind": kind, "version": loc.get("version"), "source": loc.get("source")})
     out.sort(key=lambda c: (VERSION_RANK.get(c["version"], 3), 0 if c["kind"] == "pdf" else 1))
+    if pmcid:  # Europe PMC serves open-access full text by API; ncbi.nlm.nih.gov often answers 403 to scripts
+        out.insert(0, {"url": EUROPE_PMC.format(pmcid=pmcid), "kind": "xml", "version": "publishedVersion",
+                       "source": "Europe PMC"})
     return out
 
 
@@ -58,8 +65,8 @@ def fetch_text(url: str, session=None) -> tuple[str | None, str | None]:
         ctype = r.headers.get("content-type", "").lower()
         is_pdf = "pdf" in ctype or data[:5] == b"%PDF-"
         text = pdf_to_text(data) if is_pdf else html_to_text(data)
-        if len(text.strip()) < 2000:
-            return None, "text too short (likely paywall or scanned image)"
+        if len(text.strip()) < MIN_CHARS:
+            return None, f"text too short ({len(text.strip())} chars; likely an abstract page, paywall or scanned image)"
         return text, None
     except Exception as e:  # network/parse failures are logged, never fatal
         return None, f"{type(e).__name__}: {e}"
@@ -68,12 +75,13 @@ def fetch_text(url: str, session=None) -> tuple[str | None, str | None]:
 def retrieve(publication: dict, session=None) -> dict:
     """Try candidates in preference order. Returns a source_documents-shaped dict plus 'text'."""
     last_err = "no open-access location"
-    for cand in candidate_urls(publication.get("oa_urls") or []):
+    for cand in candidate_urls(publication.get("oa_urls") or [], publication.get("pmcid")):
         text, err = fetch_text(cand["url"], session)
         if text:
             sha = hashlib.sha256(text.encode()).hexdigest()
-            CACHE.mkdir(parents=True, exist_ok=True)
-            (CACHE / f"{publication['publication_id']}.txt").write_text(text, encoding="utf-8")
+            if os.environ.get("KEEP_FULLTEXT") == "1":  # off by default: only the link and a fingerprint are kept
+                CACHE.mkdir(parents=True, exist_ok=True)
+                (CACHE / f"{publication['publication_id']}.txt").write_text(text, encoding="utf-8")
             return {"publication_id": publication["publication_id"], "status": "retrieved",
                     "source_url": cand["url"], "version_source": cand["version"] or cand["source"],
                     "content_sha256": sha, "n_chars": len(text), "error": None, "text": text}
