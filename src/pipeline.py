@@ -230,7 +230,7 @@ def coverage_audit(conn, sp: Species, sentinel_path: str = "config/sentinels.jso
     one = lambda sql, *a: fetch_all(conn, sql, list(a))[0]["n"]  # noqa: E731
     planned = {q["hash"] for q in build_queries(sp)}
     done = {r["query_hash"] for r in fetch_all(
-        conn, "SELECT DISTINCT query_hash FROM search_runs WHERE species_id=%s AND pagination_complete", [sid])}
+        conn, "SELECT DISTINCT query_hash FROM search_runs WHERE species_id=%s AND pagination_complete AND reported_total IS NOT NULL AND reported_total = retrieved_count + failed_count AND (errors IS NULL OR errors = '')", [sid])}
     sentinels = []
     if os.path.exists(sentinel_path):
         sentinels = json.load(open(sentinel_path)).get(sid, [])
@@ -238,10 +238,11 @@ def coverage_audit(conn, sp: Species, sentinel_path: str = "config/sentinels.jso
         conn, "SELECT publication_id FROM species_publications WHERE species_id=%s", [sid])}
     recall = (sum(s in found for s in sentinels) / len(sentinels)) if sentinels else None
     checks = {
-        "all_planned_queries_run": planned <= done,
-        "all_result_pages_processed": one("SELECT count(*) n FROM search_runs WHERE species_id=%s AND NOT pagination_complete", sid) == 0,
-        "reconciled": one("SELECT count(*) n FROM search_runs WHERE species_id=%s AND pagination_complete "
-                          "AND reported_total IS NOT NULL AND reported_total <> retrieved_count + failed_count", sid) == 0,
+        "all_planned_queries_run": bool(planned) and planned <= done,
+        "all_result_pages_processed": one("SELECT count(*) n FROM search_runs WHERE species_id=%s AND NOT pagination_complete", sid) == 0 and one("SELECT count(*) n FROM search_runs WHERE species_id=%s", sid) > 0,
+        "reconciled": one("SELECT count(*) n FROM search_runs WHERE species_id=%s AND (NOT pagination_complete "
+                          "OR reported_total IS NULL OR reported_total <> retrieved_count + failed_count "
+                          "OR (errors IS NOT NULL AND errors <> ''))", sid) == 0 and one("SELECT count(*) n FROM search_runs WHERE species_id=%s", sid) > 0,
         "deduplicated": True,  # enforced by unique keys on publications.doi / publication_id
         "all_records_screened": not screening.pending_stage1(conn, sid, 1),
         "fulltext_failures_documented": one(
