@@ -68,3 +68,62 @@ leaves human-only checks (supplementary data, language limits, citation expansio
 * Scanned PDFs without a text layer are logged as failed full text (no OCR).
 * Tables that PDF text extraction flattens badly may produce review items rather than verified values.
 * Supplementary datasets are not fetched.
+
+
+## Read-only publication release audit
+
+Run `python main.py validate --species SP_CURCUMA_LONGA` after migration. Exit code
+`2` means publication release remains blocked; `0` is reserved for a future
+completed, independently documented release certificate. The command never
+modifies data.
+
+`src/release_gate.py` adds two distinct gates:
+
+1. **Measurement gate:** a source quote and numerical check alone do not
+   establish analytical reliability. A release-eligible record needs independent
+   human verification, a source locator and quote, original numerical value,
+   recognized basis/unit, method, complete 15-domain quality assessment, and
+   no unresolved core quality concern.
+2. **Corpus/pilot gate:** every search snapshot must reconcile, at least 20
+   full-text papers must be manually reviewed, at least 95% of hand-checked
+   measurements must match the originals, there must be zero unit/basis
+   errors and unresolved duplicate groups, and the coverage limitations must
+   have explicit sign-off. The helper accepts measured counts, not guesses.
+
+**Current status:** the live database and full-text pilot have not been
+independently executed or certified by this GitHub update. `validate` will
+therefore report `publication_ready: false`, even if some individual
+measurements are eligible. GitHub CI tests deterministic synthetic cases;
+it cannot independently verify the underlying papers.
+
+### Existing historical turmeric backlog
+
+The prior research workbook contains incomplete OpenAlex discovery paging
+(including pages 1–2 missing from the search-hit ledger for the primary
+turmeric query) and four suspected duplicate-report pairs. These are
+**open review tasks**, not excluded studies or confirmed duplicates.
+Do not mark them resolved without fetching the source, matching versions,
+checking independent experimental units, and recording a reviewer/verdict.
+
+Do **not** import legacy sheets straight into a production 'verified' table.
+Use `import-workbook --dry-run`, then curate the quarantined records and
+run the pilot. Leave originals and all user-edited tabs untouched.
+
+### Explicit reviewer checklist
+
+- Resolve DOI/PMID/PMCID and verify study title, year, type, and corrections.
+- Verify original species/taxon, part, preparation and independent samples.
+- Record each solvent mixture/concentration, extraction temperature/time,
+  and sequential fraction as its own experimental unit.
+- Match *every* reported value to its page/table and source quote; preserve
+  uncertainty, sample basis and original unit. Verify conversion by hand.
+- Record whether standards, calibration, reference material, blanks,
+  recovery, detection/quantification limits, biological/technical replicates,
+  and statistical design were actually reported; missing is **unknown**,
+  never zero or successful.
+- Confirm potential duplicate reports and preprint/publisher versions without
+  discarding distinct experiments.
+- Reconcile every cursor/page, archived query/filter and count before
+  claiming completion within a stated source/date scope.
+- Require explicit human authorization for a research-ready release; never
+  equate in-vitro assay activity with therapeutic efficacy.
