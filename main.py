@@ -5,6 +5,7 @@
   python main.py load-species
   python main.py scan [--species SP_CURCUMA_LONGA] [--pages 25] [--screen 200] [--extract 10] [--no-sheets]
   python main.py audit --species SP_CURCUMA_LONGA
+  python main.py validate --species SP_CURCUMA_LONGA
 """
 from __future__ import annotations
 
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--extract", type=int, default=int(os.environ.get("EXTRACT_LIMIT", 10)))
     sc.add_argument("--no-sheets", action="store_true")
     sc.add_argument("--no-quality", action="store_true")
+    va = sub.add_parser("validate")
+    va.add_argument("--species", required=True)
     au = sub.add_parser("audit")
     au.add_argument("--species", required=True)
     args = ap.parse_args(argv)
@@ -78,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
             extract_limit=args.extract, do_quality=not args.no_quality, sheets_wb=wb)
         print(json.dumps(report, indent=2, default=str))
         return 1 if report["errors"] else 0
+    elif args.cmd == "validate":
+        from src.release_gate import audit_database
+        report = audit_database(conn, args.species)
+        print(json.dumps(report, indent=2, default=str))
+        return 0 if report["publication_ready"] else 2
     elif args.cmd == "audit":
         sp = next(s for s in registry if s.species_id == args.species)
         print(json.dumps(pipeline.coverage_audit(conn, sp, str(ROOT / "config/sentinels.json")), indent=2))
